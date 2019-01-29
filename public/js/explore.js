@@ -23,7 +23,7 @@
   });
 
   // action search when the search-box changes
-  $('#form-search').change(function() {
+  function onFormChangeEvent() {
     // create the body request
     var bodyRequest = {
       '$and': [],
@@ -31,11 +31,13 @@
         '$in': [],
       },
     };
+
     // add the author to the body request
     if ($('#selectAuthor').val() !== 'default') {
       bodyRequest.author = $('#selectAuthor').val();
     }
     // add the archive category to the body request
+    console.log("Category : " + $('#selectCategory').val())
     if ($('#selectCategory').val() !== 'default') {
       bodyRequest.category = $('#selectCategory').val();
     }
@@ -66,6 +68,7 @@
     }
     // add the descriptors to the body request
     $('.inputDescriptor').each(function() {
+      console.log("Descriptor: " + $(this).val())
       if ($(this).val() === '_RESERVED_REGEX' && $(this).next().find('.inputDescriptorRegex').val() !== '') {
         bodyRequest['$and'].push({
           'descriptors': {
@@ -96,32 +99,18 @@
       delete bodyRequest._id;
     }
     // execute the search each time the box search content change
+    console.log("New Request !")
+    console.log(bodyRequest)
     search(bodyRequest, 1);
-  });
+  }
+
+  $('#form-search').change(onFormChangeEvent);
 
   $('#selectCategory').change(function() {
-    if ($('#selectCategory').val() !== 'default') {
-      // select only the descriptors of the archive category
-      $.get('api/archives/descriptors/' + $('#selectCategory').val(), function(descriptors) {
-        $('#selectDescriptor').html('<option value="default">Click here to add filters</option>');
-        descriptors.forEach(function(descriptor) {
-          $('#selectDescriptor').append('<option value="' + descriptor + '">Add a filter on ' + descriptor + '</option>');
-        });
-      });
-    } else {
-      $.get('api/archives/descriptors', function(descriptors) {
-        $('#selectDescriptor').html('<option value="default">Click here to add filters</option>');
-        descriptors.forEach(function(descriptor) {
-          $('#selectDescriptor').append('<option value="' + descriptor + '">Add a filter on ' + descriptor + '</option>');
-        });
-      });
-    }
-
-    // delete existing descriptors
-    $('.descriptor-group').each(function() {
-      $(this).remove();
-    });
-    selectedDescriptor = [];
+    updateFormToCategory()
+    // manually trigger a change on the search form, because it was disabled on updateFormToCategory()
+    // This mechanism exists to allow to change the category without necessarily triggering a search
+    $('form-search').trigger('change')
   });
 
   $('#form-search').submit(function(e) {
@@ -757,7 +746,7 @@
           }
           if (search.archiveCategory) {
             $('#selectCategory').val(search.archiveCategory);
-            $('#selectCategory').trigger('change');
+            updateFormToCategory();
           }
           if (search.archiveAuthor) {
             $('#selectAuthor').val(search.archiveAuthor);
@@ -771,9 +760,13 @@
           if (search.ids.length > 0) {
             $('#inputIds').val(search.ids.join(', '));
           }
+          // replace this timeout by a waiting for a content in the form
+          // in order to trigger the change only when content is available.
+          // For instance, a useless div with a unique ID can be added to
+          // mark the form as completed.
           setTimeout(function() {
             resolve();
-          }, 100);
+          }, 500);
         }).then(function() {
           $('#form-search').trigger('change');
         });
@@ -999,5 +992,38 @@
         '</div>' +
       '</div>').insertAfter(inputDescriptorObject);
   }
+
+  function updateFormToCategory(){
+    // disable change event for this function
+    $('#form-search').off('change');
+
+    // Change the form in function of the category
+    if ($('#selectCategory').val() !== 'default') {
+        // select only the descriptors of the archive category
+        $.get('api/archives/descriptors/' + $('#selectCategory').val(), function(descriptors) {
+          $('#selectDescriptor').html('<option value="default">Click here to add filters</option>');
+          descriptors.forEach(function(descriptor) {
+            $('#selectDescriptor').append('<option value="' + descriptor + '">Add a filter on ' + descriptor + '</option>');
+          });
+        });
+    } else {
+        $.get('api/archives/descriptors', function(descriptors) {
+          $('#selectDescriptor').html('<option value="default">Click here to add filters</option>');
+          descriptors.forEach(function(descriptor) {
+            $('#selectDescriptor').append('<option value="' + descriptor + '">Add a filter on ' + descriptor + '</option>');
+          });
+        });
+    }
+
+    // delete existing descriptors
+    $('.descriptor-group').each(function() {
+    $(this).remove();
+    });
+
+    selectedDescriptor = [];
+
+    // Activate the change event again after the category has been updated
+    $('#form-search').on('change', onFormChangeEvent);
+    }
 
 })(jQuery);
