@@ -1,6 +1,16 @@
 (function($) {
   'use strict';
 
+  // ------------------------------ Utils --------------------------------- //
+  
+  function waitForValue(elementName) {
+    var checkValue = setInterval(function() {
+      if ($(elementName).val() != undefined) {
+        clearInterval(checkValue);
+      }
+    }, 100); // check every 100ms
+  }
+
   // ------------------------------ Search -------------------------------- //
 
   // get all archive authors
@@ -22,10 +32,10 @@
     });
   });
 
-  // action search when the search-box changes
-  function onFormChangeEvent() {
+  // Search archives based on search form content, and display them
+  function searchAndDisplayFromForm() {
     // create the body request
-    var bodyRequest = {
+    var query = {
       '$and': [],
       '_id': {
         '$in': [],
@@ -34,24 +44,23 @@
 
     // add the author to the body request
     if ($('#selectAuthor').val() !== 'default') {
-      bodyRequest.author = $('#selectAuthor').val();
+      query.author = $('#selectAuthor').val();
     }
     // add the archive category to the body request
-    console.log("Category : " + $('#selectCategory').val())
     if ($('#selectCategory').val() !== 'default') {
-      bodyRequest.category = $('#selectCategory').val();
+      query.category = $('#selectCategory').val();
     }
     // add the date to the body request
     if ($('#inputDate').val() !== '') {
       if ($('#checkboxDateRange').is(':checked') && $('#inputDate2').val() !== '') {
         // date range
-        bodyRequest.date = [
+        query.date = [
           $('#inputDate').val(),
           $('#inputDate2').val(),
         ];
       } else {
         // unique date
-        bodyRequest.date = $('#inputDate').val();
+        query.date = $('#inputDate').val();
       }
     }
     // add the IDs to the body request
@@ -60,7 +69,7 @@
       var checkForHexRegExp = /^[a-f\d]{24}$/i;
       ids.forEach(function(id) {
         if (checkForHexRegExp.test(id)) {
-          bodyRequest._id['$in'].push(id);
+          query._id['$in'].push(id);
         } else if (id !== '') {
           showModal('Warning', id + ' is not a valid ID');
         }
@@ -68,9 +77,8 @@
     }
     // add the descriptors to the body request
     $('.inputDescriptor').each(function() {
-      console.log("Descriptor: " + $(this).val())
       if ($(this).val() === '_RESERVED_REGEX' && $(this).next().find('.inputDescriptorRegex').val() !== '') {
-        bodyRequest['$and'].push({
+        query['$and'].push({
           'descriptors': {
             '$elemMatch': {
               'name': $(this).closest('.form-group').find('label').html(),
@@ -81,7 +89,7 @@
           },
         });
       } else if ($(this).val() !== '' && $(this).val() !== '_RESERVED_REGEX') {
-        bodyRequest['$and'].push({
+        query['$and'].push({
           'descriptors': {
             '$elemMatch': {
               'name': $(this).closest('.form-group').find('label').html(),
@@ -92,36 +100,31 @@
       }
     });
 
-    if (bodyRequest['$and'].length === 0) {
-      delete bodyRequest['$and'];
+    if (query['$and'].length === 0) {
+      delete query['$and'];
     }
-    if (bodyRequest._id['$in'].length === 0) {
-      delete bodyRequest._id;
+    if (query._id['$in'].length === 0) {
+      delete query._id;
     }
-    // execute the search each time the box search content change
-    console.log("New Request !")
-    console.log(bodyRequest)
-    search(bodyRequest, 1);
+    // Display first page of the results
+    searchAndDisplay(query, 1);
   }
 
-  $('#form-search').change(onFormChangeEvent);
+  // Update search results when form is updated
+  $('#form-search').change(searchAndDisplayFromForm);
 
-  $('#selectCategory').change(function() {
-    updateFormToCategory()
-    // manually trigger a change on the search form, because it was disabled on updateFormToCategory()
-    // This mechanism exists to allow to change the category without necessarily triggering a search
-    $('form-search').trigger('change')
-  });
+  // Update the search form fields when category changes
+  $('#selectCategory').change(updateFormToCategory);
 
   $('#form-search').submit(function(e) {
     e.preventDefault();
   });
 
   // add input when a new descriptor is selected
-  var selectedDescriptor = [];
   $('#selectDescriptor').change(function() {
-    if ($('#selectDescriptor').val() !== 'default' && !selectedDescriptor.includes($('#selectDescriptor').val())) {
-      selectedDescriptor.push($('#selectDescriptor').val());
+    var selectedDescriptor = $('#selectDescriptor').val()
+    if (selectedDescriptor !== 'default' 
+		&& $("#form-search").find(".inputDescriptor."+selectedDescriptor).length == 0) {
       addDescriptorToForm($('#selectDescriptor').val())
     }
     $('#selectDescriptor').val('default');
@@ -129,8 +132,6 @@
 
   // delete descriptor input
   $('#form-search').on('click', '.deleteDescriptor', function() {
-    // remove descriptor from the array
-    selectedDescriptor.splice(selectedDescriptor.indexOf($(this).closest('.form-group').find('label').html()), 1);
     // remove descriptor input from the page
     $(this).closest('.form-group').remove();
     $('#form-search').trigger('change');
@@ -169,14 +170,11 @@
     }
   });
 
-  /**
-   * Search archives in function of body and page
-   * @param {object} body
-   * @param {string} page
-   */
-  function search(body, page) {
+
+  // Search archives and display them
+  function searchAndDisplay(query, page) {
     var resultPerPage = 30;
-    $.post('api/archives/page/' + page + '/' + resultPerPage, body, function(archives) {
+    $.post('api/archives/page/' + page + '/' + resultPerPage, query, function(archives) {
       var matchedArchives = [];
       $('#archives-grid').html('');
       if (isConnected() && isMaster()) {
@@ -330,7 +328,7 @@
       }
 
       // display number of results
-      $.post('api/archives', body, function(totalArchives) {
+      $.post('api/archives', query, function(totalArchives) {
         if (totalArchives.length > 1) {
           $('#header-result').html('' +
           '<div class="card mb-3">' +
@@ -705,7 +703,6 @@
                 headers: {'Authorization': 'Basic ' + btoa(getAuthentification())},
                 data: search,
                 success: function(data) {
-                  console.log(data);
                   if (data.name === 'Success') {
                     showModal('Success', 'Your search has been saved !<br><br>You can now find it in "My Searches" to reuse it or to share it.');
                   }
@@ -731,45 +728,34 @@
   if (getUrlParameter('search')) {
     $.get('api/search/id/' + getUrlParameter('search'), function(search) {
       if (search._id) {
-        return new Promise(function(resolve) {
-          if (search.date) {
-            if (typeof search.date === 'string') {
-              // unique date
-              $('#inputDate').val(search.date);
-            } else {
-              // date range
-              $('#checkboxDateRange').trigger('click');
-              $('#inputDate2').prop('disabled', false);
-              $('#inputDate').val(search.date[0]);
-              $('#inputDate2').val(search.date[1]);
-            }
+        if (search.date) {
+          if (typeof search.date === 'string') {
+            // unique date
+            $('#inputDate').val(search.date);
+          } else {
+            // date range
+            $('#checkboxDateRange').trigger('click');
+            $('#inputDate2').prop('disabled', false);
+            $('#inputDate').val(search.date[0]);
+            $('#inputDate2').val(search.date[1]);
           }
-          if (search.archiveCategory) {
-            $('#selectCategory').val(search.archiveCategory);
-            updateFormToCategory();
-          }
-          if (search.archiveAuthor) {
-            $('#selectAuthor').val(search.archiveAuthor);
-          }
-          if (search.descriptors.length > 0) {
-            search.descriptors.forEach(function(descriptor) {
-              selectedDescriptor.push(descriptor.name);
-              addDescriptorToForm(descriptor.name, descriptor.value, descriptor.regex)
-              });
-          }
-          if (search.ids.length > 0) {
-            $('#inputIds').val(search.ids.join(', '));
-          }
-          // replace this timeout by a waiting for a content in the form
-          // in order to trigger the change only when content is available.
-          // For instance, a useless div with a unique ID can be added to
-          // mark the form as completed.
-          setTimeout(function() {
-            resolve();
-          }, 500);
-        }).then(function() {
-          $('#form-search').trigger('change');
-        });
+        }
+        if (search.archiveCategory) {
+          $('#selectCategory').val(search.archiveCategory);
+          updateFormToCategory();
+        }
+        if (search.archiveAuthor) {
+          $('#selectAuthor').val(search.archiveAuthor);
+        }
+        if (search.descriptors.length > 0) {
+          search.descriptors.forEach(function(descriptor) {
+            addDescriptorToForm(descriptor.name, descriptor.value, descriptor.regex)
+            });
+        }
+        if (search.ids.length > 0) {
+          $('#inputIds').val(search.ids.join(', '));
+        }
+        searchAndDisplayFromForm()
       } else {
         console.log('Error with the search ID in params.');
         console.log(search);
@@ -780,7 +766,6 @@
     var query = JSON.parse(getUrlParameter('query'));
 
     // put the query in the search-box
-    setTimeout(function() {
       if (query.author) {
         $('#selectAuthor').val(query.author);
       }
@@ -802,18 +787,17 @@
       }
       if (query['$and']) {
         query['$and'].forEach(function(specificFilter) {
-          selectedDescriptor.push(specificFilter.descriptors['$elemMatch'].name);
           addDescriptorToForm(specificFilter.descriptors['$elemMatch'].name,
                               specificFilter.descriptors['$elemMatch'].value)
         });
       }
-      search(query, page);
-    }, 100);
+      searchAndDisplay(query, page);
+
   } else if (getUrlParameter('page')) {
     var page = getUrlParameter('page');
-    search({}, page);
+    searchAndDisplay({}, page);
   } else {
-    search({}, 1);
+    searchAndDisplay({}, 1);
   }
 
   // -------------------------- Functions -------------------------- //
@@ -941,25 +925,35 @@
     $('#myModal').modal('show');
   }
 
+  function getNewDescriptorGroup(descriptorName) {
+    var html = `
+      <div class="form-group descriptor-group">
+        <label class="labelDescriptor"> ${descriptorName} </label>
+        <div class="row">
+          <div class="col">
+            <select class="form-control inputDescriptor ${descriptorName}">
+              <option></option>
+            </select>
+          </div>
+          <div class="col-2">
+            <button type="button" class="btn btn-warning deleteDescriptor" id="deleteDescriptor">
+              <i class="fa fa-times" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      `;
+    return $(html);
+  }
+
+
   function addDescriptorToForm(descriptorName, descriptorValue, descriptorRegex) {
     if (typeof(descriptorValue)==='undefined') descriptorValue = '';
     if (typeof(descriptorRegex)==='undefined') descriptorRegex = '';
 
-    $('#form-search').append('' +
-      '<div class="form-group descriptor-group">' +
-        '<label class="labelDescriptor">' + descriptorName + '</label>' +
-        '<div class="row">' +
-          '<div class="col">' +
-            '<select class="form-control inputDescriptor ' + descriptorName + '">' +
-              '<option></option>' +
-            '</select>' +
-          '</div>' +
-          '<div class="col-2">' +
-            '<button type="button" class="btn btn-warning deleteDescriptor" id="deleteDescriptor"><i class="fa fa-times" aria-hidden="true"></i></button>' +
-          '</div>' +
-        '</div>' +
-      '</div>'
-      );
+    // create a new descriptor group
+    var newDescriptorGroup = getNewDescriptorGroup(descriptorName);
+    $('#form-search').append(newDescriptorGroup);
 
     // insert all the options of this descriptor, but not the regex yet
     $.get('/api/archives/options/' + descriptorName, function(options) {
@@ -982,6 +976,7 @@
       }
   }
 
+
   function insertRegexField(inputDescriptorObject, regexValue){
     if (typeof(regexValue)==='undefined') regexValue = '';
     $('' +
@@ -994,9 +989,6 @@
   }
 
   function updateFormToCategory(){
-    // disable change event for this function
-    $('#form-search').off('change');
-
     // Change the form in function of the category
     if ($('#selectCategory').val() !== 'default') {
         // select only the descriptors of the archive category
@@ -1017,13 +1009,9 @@
 
     // delete existing descriptors
     $('.descriptor-group').each(function() {
-    $(this).remove();
-    });
+    	$(this).remove();
+   	});
 
-    selectedDescriptor = [];
-
-    // Activate the change event again after the category has been updated
-    $('#form-search').on('change', onFormChangeEvent);
-    }
+  }
 
 })(jQuery);
